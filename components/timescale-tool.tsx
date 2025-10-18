@@ -76,8 +76,9 @@ export function TimescaleTool({ part }: { part: TimescaleToolPart }) {
     );
   }
 
+  const hasInput = part.input !== null && part.input !== undefined;
   const shouldShowInput =
-    part.input &&
+    hasInput &&
     (headerState === "input-available" ||
       headerState === "output-streaming" ||
       headerState === "output-available");
