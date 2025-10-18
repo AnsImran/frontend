@@ -1,4 +1,3 @@
-import { headers } from "next/headers";
 import type { NextRequest } from "next/server";
 import { NextResponse } from "next/server";
 import { SERVER_FASTAPI_BASE_URL } from "@/lib/config";
@@ -88,11 +87,10 @@ async function proxy(request: NextRequest, { params }: HandlerParams) {
       headers: responseHeaders,
     });
   } catch (error) {
-    const requestHeaders = headers();
     console.error("FastAPI proxy error:", {
       error,
       path: upstreamUrl.pathname,
-      host: requestHeaders.get("host"),
+      host: request.headers.get("host"),
     });
 
     return NextResponse.json(
