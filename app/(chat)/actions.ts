@@ -71,7 +71,6 @@ export async function ensureChatTitle({
 }
 
 function buildFallbackTitle(message: ChatMessage) {
-```
   const text = getTextFromMessage(message).trim();
 
   if (!text) {
