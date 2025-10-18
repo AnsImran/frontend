@@ -6,21 +6,26 @@ import { Chat } from "@/components/chat";
 import { DataStreamHandler } from "@/components/data-stream-handler";
 import { DEFAULT_CHAT_MODEL } from "@/lib/ai/models";
 import { getChatById, getMessagesByChatId } from "@/lib/db/queries";
-import { convertToUIMessages } from "@/lib/utils";
+import { FASTAPI_HISTORY_ENDPOINT } from "@/lib/config";
+import {
+  convertMicroserviceHistoryToChatMessages,
+  convertToUIMessages,
+  type MicroserviceHistoryResponse,
+} from "@/lib/utils";
 
 export default async function Page(props: { params: Promise<{ id: string }> }) {
   const params = await props.params;
   const { id } = params;
-  const chat = await getChatById({ id });
-
-  if (!chat) {
-    notFound();
-  }
-
   const session = await auth();
 
   if (!session) {
     redirect("/api/auth/guest");
+  }
+
+  const chat = await getChatById({ id });
+
+  if (!chat) {
+    notFound();
   }
 
   if (chat.visibility === "private") {
@@ -37,7 +42,40 @@ export default async function Page(props: { params: Promise<{ id: string }> }) {
     id,
   });
 
-  const uiMessages = convertToUIMessages(messagesFromDb);
+  let uiMessages = convertToUIMessages(messagesFromDb);
+
+  try {
+    const historyResponse = await fetch(FASTAPI_HISTORY_ENDPOINT, {
+      method: "POST",
+      headers: {
+        Accept: "application/json",
+        "Content-Type": "application/json",
+      },
+      body: JSON.stringify({ thread_id: id }),
+      cache: "no-store",
+    });
+
+    if (historyResponse.ok) {
+      const historyJson =
+        (await historyResponse.json()) as MicroserviceHistoryResponse;
+      const microserviceMessages =
+        convertMicroserviceHistoryToChatMessages(historyJson);
+
+      if (microserviceMessages.length > 0) {
+        uiMessages = microserviceMessages;
+      }
+    } else {
+      console.warn("Microservice history request failed", {
+        chatId: id,
+        status: historyResponse.status,
+      });
+    }
+  } catch (error) {
+    console.warn("Microservice history request error", {
+      chatId: id,
+      error,
+    });
+  }
 
   const cookieStore = await cookies();
   const chatModelFromCookie = cookieStore.get("chat-model");
@@ -51,8 +89,10 @@ export default async function Page(props: { params: Promise<{ id: string }> }) {
           initialChatModel={DEFAULT_CHAT_MODEL}
           initialLastContext={chat.lastContext ?? undefined}
           initialMessages={uiMessages}
+          initialTitle={chat.title}
           initialVisibilityType={chat.visibility}
           isReadonly={session?.user?.id !== chat.userId}
+          userId={session?.user?.id ?? ""}
         />
         <DataStreamHandler />
       </>
@@ -67,8 +107,10 @@ export default async function Page(props: { params: Promise<{ id: string }> }) {
         initialChatModel={chatModelFromCookie.value}
         initialLastContext={chat.lastContext ?? undefined}
         initialMessages={uiMessages}
+        initialTitle={chat.title}
         initialVisibilityType={chat.visibility}
         isReadonly={session?.user?.id !== chat.userId}
+        userId={session?.user?.id ?? ""}
       />
       <DataStreamHandler />
     </>

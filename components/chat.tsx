@@ -3,9 +3,10 @@
 import { useChat } from "@ai-sdk/react";
 import { DefaultChatTransport } from "ai";
 import { useSearchParams } from "next/navigation";
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useRef, useState, useTransition } from "react";
 import useSWR, { useSWRConfig } from "swr";
 import { unstable_serialize } from "swr/infinite";
+import { ensureChatTitle } from "@/app/(chat)/actions";
 import { ChatHeader } from "@/components/chat-header";
 import {
   AlertDialog,
@@ -22,9 +23,23 @@ import { useAutoResume } from "@/hooks/use-auto-resume";
 import { useChatVisibility } from "@/hooks/use-chat-visibility";
 import type { Vote } from "@/lib/db/schema";
 import { ChatSDKError } from "@/lib/errors";
+import {
+  FASTAPI_MODEL_MAPPING,
+  DEFAULT_FASTAPI_MODEL,
+} from "@/lib/ai/models";
+import {
+  FASTAPI_AGENT_ID,
+  FASTAPI_STREAM_ENDPOINT,
+} from "@/lib/config";
 import type { Attachment, ChatMessage } from "@/lib/types";
 import type { AppUsage } from "@/lib/usage";
-import { fetcher, fetchWithErrorHandlers, generateUUID } from "@/lib/utils";
+import {
+  fetcher,
+  fetchWithErrorHandlers,
+  generateUUID,
+  getMostRecentUserMessage,
+  getTextFromMessage,
+} from "@/lib/utils";
 import { Artifact } from "./artifact";
 import { useDataStream } from "./data-stream-provider";
 import { Messages } from "./messages";
@@ -33,9 +48,19 @@ import { getChatHistoryPaginationKey } from "./sidebar-history";
 import { toast } from "./toast";
 import type { VisibilityType } from "./visibility-selector";
 
+const FASTAPI_STREAM_HEADERS = {
+  Accept: "text/event-stream",
+  "Content-Type": "application/json",
+};
+const DEFAULT_AGENT_CONFIG = {
+  spicy_level: 0.8,
+};
+
 export function Chat({
   id,
+  userId,
   initialMessages,
+  initialTitle,
   initialChatModel,
   initialVisibilityType,
   isReadonly,
@@ -44,11 +69,13 @@ export function Chat({
 }: {
   id: string;
   initialMessages: ChatMessage[];
+  initialTitle: string;
   initialChatModel: string;
   initialVisibilityType: VisibilityType;
   isReadonly: boolean;
   autoResume: boolean;
   initialLastContext?: AppUsage;
+  userId: string;
 }) {
   const { visibilityType } = useChatVisibility({
     chatId: id,
@@ -63,6 +90,8 @@ export function Chat({
   const [showCreditCardAlert, setShowCreditCardAlert] = useState(false);
   const [currentModelId, setCurrentModelId] = useState(initialChatModel);
   const currentModelIdRef = useRef(currentModelId);
+  const titleGeneratedRef = useRef(initialTitle !== "New Chat");
+  const [, startTransition] = useTransition();
 
   useEffect(() => {
     currentModelIdRef.current = currentModelId;
@@ -82,17 +111,30 @@ export function Chat({
     experimental_throttle: 100,
     generateId: generateUUID,
     transport: new DefaultChatTransport({
-      api: "/api/chat",
+      api: `${FASTAPI_STREAM_ENDPOINT}?agent_id=${FASTAPI_AGENT_ID}`,
       fetch: fetchWithErrorHandlers,
+      headers: FASTAPI_STREAM_HEADERS,
       prepareSendMessagesRequest(request) {
+        const latestUserMessage = getMostRecentUserMessage(request.messages);
+        const messageText = latestUserMessage
+          ? getTextFromMessage(latestUserMessage)
+          : "";
+
+        const remoteModel =
+          FASTAPI_MODEL_MAPPING[currentModelIdRef.current] ??
+          DEFAULT_FASTAPI_MODEL;
+
         return {
           body: {
-            id: request.id,
-            message: request.messages.at(-1),
-            selectedChatModel: currentModelIdRef.current,
-            selectedVisibilityType: visibilityType,
-            ...request.body,
+            message: messageText,
+            model: remoteModel,
+            thread_id: request.id,
+            user_id: userId || "anonymous",
+            agent_config: DEFAULT_AGENT_CONFIG,
+            stream_tokens: true,
           },
+          headers: FASTAPI_STREAM_HEADERS,
+          api: `${FASTAPI_STREAM_ENDPOINT}?agent_id=${FASTAPI_AGENT_ID}`,
         };
       },
     }),
@@ -121,6 +163,42 @@ export function Chat({
       }
     },
   });
+
+  useEffect(() => {
+    if (titleGeneratedRef.current) {
+      return;
+    }
+
+    const firstUserMessage = messages.find((message) => message.role === "user");
+
+    if (!firstUserMessage) {
+      return;
+    }
+
+    titleGeneratedRef.current = true;
+
+    startTransition(() => {
+      ensureChatTitle({
+        chatId: id,
+        message: firstUserMessage,
+        userId,
+        visibility: visibilityType,
+      })
+        .then((title) => {
+          if (!title) {
+            // Allow retry if generation failed completely.
+            titleGeneratedRef.current = false;
+            return;
+          }
+
+          mutate(unstable_serialize(getChatHistoryPaginationKey));
+        })
+        .catch((error) => {
+          console.error("Failed to generate chat title", error);
+          titleGeneratedRef.current = false;
+        });
+    });
+  }, [messages, id, mutate, userId, visibilityType]);
 
   const searchParams = useSearchParams();
   const query = searchParams.get("query");

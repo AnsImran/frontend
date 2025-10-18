@@ -20,6 +20,10 @@ export const myProvider = isTestEnvironment
           "chat-model-reasoning": reasoningModel,
           "title-model": titleModel,
           "artifact-model": artifactModel,
+          "gpt-4.1-nano-2025-04-14": chatModel,
+          "gpt-4o": chatModel,
+          "gpt-4o-mini": chatModel,
+          "gpt-5-nano-2025-08-07": reasoningModel,
         },
       });
     })()
@@ -32,5 +36,15 @@ export const myProvider = isTestEnvironment
         }),
         "title-model": gateway.languageModel("xai/grok-2-1212"),
         "artifact-model": gateway.languageModel("xai/grok-2-1212"),
+        // Temporary mappings so UI IDs resolve even though FastAPI handles execution.
+        "gpt-4.1-nano-2025-04-14": gateway.languageModel(
+          "xai/grok-2-vision-1212"
+        ),
+        "gpt-4o": gateway.languageModel("xai/grok-2-vision-1212"),
+        "gpt-4o-mini": gateway.languageModel("xai/grok-2-vision-1212"),
+        "gpt-5-nano-2025-08-07": wrapLanguageModel({
+          model: gateway.languageModel("xai/grok-3-mini"),
+          middleware: extractReasoningMiddleware({ tagName: "think" }),
+        }),
       },
     });

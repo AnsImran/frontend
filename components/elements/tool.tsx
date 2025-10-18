@@ -35,27 +35,46 @@ export type ToolHeaderProps = {
 };
 
 const getStatusBadge = (status: ToolUIPart["state"]) => {
-  const labels = {
-    "input-streaming": "Pending",
-    "input-available": "Running",
-    "output-available": "Completed",
-    "output-error": "Error",
-  } as const;
+  const statusMap: Record<
+    string,
+    { label: string; icon: ReactNode }
+  > = {
+    "input-streaming": {
+      label: "Pending",
+      icon: <CircleIcon className="size-4" />,
+    },
+    "input-in-progress": {
+      label: "Pending",
+      icon: <CircleIcon className="size-4" />,
+    },
+    "input-available": {
+      label: "Running",
+      icon: <ClockIcon className="size-4 animate-pulse" />,
+    },
+    "output-streaming": {
+      label: "Streaming",
+      icon: <ClockIcon className="size-4 animate-pulse" />,
+    },
+    "output-available": {
+      label: "Completed",
+      icon: <CheckCircleIcon className="size-4 text-green-600" />,
+    },
+    "output-error": {
+      label: "Error",
+      icon: <XCircleIcon className="size-4 text-red-600" />,
+    },
+  };
 
-  const icons = {
-    "input-streaming": <CircleIcon className="size-4" />,
-    "input-available": <ClockIcon className="size-4 animate-pulse" />,
-    "output-available": <CheckCircleIcon className="size-4 text-green-600" />,
-    "output-error": <XCircleIcon className="size-4 text-red-600" />,
-  } as const;
+  const entry =
+    statusMap[status] ?? statusMap["input-streaming"];
 
   return (
     <Badge
       className="flex items-center gap-1 rounded-full text-xs"
       variant="secondary"
     >
-      {icons[status]}
-      <span>{labels[status]}</span>
+      {entry.icon}
+      <span>{entry.label}</span>
     </Badge>
   );
 };

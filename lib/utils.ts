@@ -108,6 +108,205 @@ export function convertToUIMessages(messages: DBMessage[]): ChatMessage[] {
   }));
 }
 
+export type MicroserviceHistoryMessage = {
+  type: string;
+  content: unknown;
+  tool_calls?: unknown[];
+  tool_call_id?: string | null;
+  run_id?: string | null;
+  response_metadata?: Record<string, unknown> | null;
+  custom_data?: Record<string, unknown> | null;
+};
+
+export type MicroserviceHistoryResponse = {
+  messages: MicroserviceHistoryMessage[];
+};
+
+function stringifyHistoryContent(content: unknown): string {
+  if (typeof content === 'string') {
+    return content;
+  }
+
+  if (content == null) {
+    return '';
+  }
+
+  if (Array.isArray(content)) {
+    return content.map((entry) => stringifyHistoryContent(entry)).join('');
+  }
+
+  if (typeof content === 'object' && 'text' in (content as Record<string, unknown>)) {
+    const entry = content as { text?: unknown };
+    if (typeof entry.text === 'string') {
+      return entry.text;
+    }
+  }
+
+  try {
+    return JSON.stringify(content);
+  } catch {
+    return String(content);
+  }
+}
+
+export function convertMicroserviceHistoryToChatMessages(
+  history: MicroserviceHistoryResponse,
+): ChatMessage[] {
+  if (!history?.messages?.length) {
+    return [];
+  }
+
+  const uiMessages: ChatMessage[] = [];
+  const sourceMessages = history.messages;
+
+  for (let index = 0; index < sourceMessages.length; index += 1) {
+    const message = sourceMessages[index];
+    if (!message) continue;
+
+    const toolCalls = Array.isArray(message.tool_calls)
+      ? (message.tool_calls as Array<Record<string, unknown>>).filter(
+          (toolCall) => toolCall && typeof toolCall === 'object',
+        )
+      : [];
+
+    const isAssistantWithTools =
+      message.type === 'ai' && toolCalls.length > 0;
+
+    if (isAssistantWithTools) {
+      const toolCallMetas = toolCalls.map((toolCall) => {
+        const id =
+          typeof toolCall.id === 'string'
+            ? toolCall.id
+            : generateUUID();
+        const name =
+          typeof toolCall.name === 'string'
+            ? toolCall.name
+            : 'tool';
+        const args =
+          'args' in toolCall ? (toolCall as { args?: unknown }).args : undefined;
+        return { id, name, args };
+      });
+
+      const knownToolCallIds = new Set(
+        toolCallMetas.map((meta) => meta.id),
+      );
+      const toolOutputs = new Map<string, string>();
+
+      let finalAssistantText: string | undefined;
+      let consumed = 0;
+      let cursor = index + 1;
+
+      while (cursor < sourceMessages.length) {
+        const nextMessage = sourceMessages[cursor];
+        if (!nextMessage) break;
+
+        if (
+          nextMessage.type === 'tool' &&
+          typeof nextMessage.tool_call_id === 'string' &&
+          knownToolCallIds.has(nextMessage.tool_call_id)
+        ) {
+          toolOutputs.set(
+            nextMessage.tool_call_id,
+            stringifyHistoryContent(nextMessage.content),
+          );
+          cursor += 1;
+          consumed += 1;
+          continue;
+        }
+
+        if (
+          nextMessage.type === 'ai' &&
+          (!Array.isArray(nextMessage.tool_calls) ||
+            nextMessage.tool_calls.length === 0)
+        ) {
+          finalAssistantText = sanitizeText(
+            stringifyHistoryContent(nextMessage.content),
+          );
+          cursor += 1;
+          consumed += 1;
+        }
+
+        break;
+      }
+
+      const initialAssistantText = sanitizeText(
+        stringifyHistoryContent(message.content),
+      );
+
+      const toolParts = toolCallMetas.map((meta) => {
+        const hasOutput = toolOutputs.has(meta.id);
+        const output = toolOutputs.get(meta.id);
+        return {
+          type: 'dynamic-tool',
+          toolCallId: meta.id,
+          toolName: meta.name,
+          state: hasOutput ? 'output-available' : 'input-available',
+          input: meta.args ?? null,
+          ...(hasOutput ? { output } : {}),
+        } as UIMessagePart<CustomUIDataTypes, ChatTools>;
+      });
+
+      if (initialAssistantText) {
+        toolParts.push({
+          type: 'text',
+          text: initialAssistantText,
+        } as UIMessagePart<CustomUIDataTypes, ChatTools>);
+      }
+
+      if (
+        finalAssistantText &&
+        finalAssistantText !== initialAssistantText
+      ) {
+        toolParts.push({
+          type: 'text',
+          text: finalAssistantText,
+        } as UIMessagePart<CustomUIDataTypes, ChatTools>);
+      }
+
+      if (toolParts.length > 0) {
+        uiMessages.push({
+          id: generateUUID(),
+          role: 'assistant',
+          parts: toolParts,
+          metadata: {
+            createdAt: formatISO(new Date()),
+          },
+        });
+      }
+
+      index += consumed;
+      continue;
+    }
+
+    const role =
+      message.type === 'human'
+        ? ('user' as const)
+        : message.type === 'ai'
+          ? ('assistant' as const)
+          : message.type === 'system'
+            ? ('system' as const)
+            : ('assistant' as const);
+
+    const text = stringifyHistoryContent(message.content);
+
+    uiMessages.push({
+      id: generateUUID(),
+      role,
+      parts: [
+        {
+          type: 'text' as const,
+          text,
+        },
+      ],
+      metadata: {
+        createdAt: formatISO(new Date()),
+      },
+    });
+  }
+
+  return uiMessages;
+}
+
 export function getTextFromMessage(message: ChatMessage): string {
   return message.parts
     .filter((part) => part.type === 'text')
