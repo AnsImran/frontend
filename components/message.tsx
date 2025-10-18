@@ -268,11 +268,13 @@ const PurePreviewMessage = ({
               );
             }
 
+            const typeName = type as string;
+
             if (
               (type === "dynamic-tool" &&
                 "toolName" in part &&
                 part.toolName === "get_docs_pgvector") ||
-              type === "tool-get_docs_pgvector"
+              typeName === "tool-get_docs_pgvector"
             ) {
               return (
                 <TimescaleTool
