@@ -307,9 +307,25 @@ export function convertMicroserviceHistoryToChatMessages(
   return uiMessages;
 }
 
-export function getTextFromMessage(message: ChatMessage): string {
+type MessageLike = {
+  parts?: Array<
+    {
+      type: string;
+      text?: string;
+    }
+  >;
+};
+
+export function getTextFromMessage(message: MessageLike): string {
+  if (!message?.parts?.length) {
+    return '';
+  }
+
   return message.parts
-    .filter((part) => part.type === 'text')
+    .filter(
+      (part): part is { type: 'text'; text: string } =>
+        part.type === 'text' && typeof part.text === 'string',
+    )
     .map((part) => part.text)
     .join('');
 }
