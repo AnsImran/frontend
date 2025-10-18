@@ -12,7 +12,7 @@ import {
   CardTitle,
 } from "./ui/card";
 
-type TimescaleToolPart = {
+export type TimescaleToolPart = {
   type: string;
   state?: string;
   toolCallId?: string;
