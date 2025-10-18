@@ -1,5 +1,6 @@
 "use client";
 
+import type { ToolUIPart } from "ai";
 import type { ReactNode } from "react";
 import { useState } from "react";
 import { Tool, ToolContent, ToolHeader, ToolInput, ToolOutput } from "./elements/tool";
@@ -87,7 +88,9 @@ export function TimescaleTool({ part }: { part: TimescaleToolPart }) {
     <Tool defaultOpen={false} key={part.toolCallId ?? headerType}>
       <ToolHeader state={headerState as any} type={headerType as any} />
       <ToolContent>
-        {shouldShowInput && <ToolInput input={part.input} />}
+        {shouldShowInput && (
+          <ToolInput input={part.input as ToolUIPart["input"]} />
+        )}
         {shouldShowOutput && (
           <ToolOutput
             className="pt-0"
